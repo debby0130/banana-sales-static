@@ -1,7 +1,10 @@
 const $ = selector => document.querySelector(selector);
 const state = { csrf: '', settings: null, pending: [], sales: [], importData: null, noticeTimer: null, loginGeneration: 0 };
 const money = value => `$${Number(value || 0).toLocaleString('zh-TW')}`;
-const twDate = value => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' }).format(value);
+const twDate = value => {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(value).map(part => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+};
 const twTime = value => new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value));
 const today = () => twDate(new Date());
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -9,13 +12,14 @@ const assetUrl = name => window.BANANA_ASSET_BASE ? `${window.BANANA_ASSET_BASE}
 
 function gasCall(path, options = {}) {
   return new Promise((resolve, reject) => {
+    const generation = state.loginGeneration;
     const method = options.method || 'GET';
     const body = options.body ? JSON.parse(options.body) : null;
     const token = sessionStorage.getItem('banana_gas_session') || '';
     const key = options.headers?.['Idempotency-Key'] || '';
     google.script.run.withSuccessHandler(result => {
       if (!result.ok) {
-        if (result.status === 401) showLogin();
+        if (result.status === 401 && path !== '/api/auth/session' && generation === state.loginGeneration) showLogin();
         const error = new Error(typeof result.detail === 'string' ? result.detail : result.detail?.message || '操作失敗，請稍後再試');
         error.status = result.status;
         error.detail = result.detail;

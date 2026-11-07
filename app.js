@@ -66,7 +66,13 @@ function showLogin() {
 async function initialize() {
   const generation = state.loginGeneration;
   try {
-    const status = await api('/api/auth/status');
+    let status;
+    let lastError;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try { status = await api('/api/auth/status'); break; }
+      catch (error) { lastError = error; await new Promise(resolve => setTimeout(resolve, 450 * (attempt + 1))); }
+    }
+    if (!status) throw lastError || new Error('登入工作階段尚未同步');
     state.csrf = status.csrf_token;
     $('#login-screen').hidden = true;
     $('#app-screen').hidden = false;

@@ -1,5 +1,5 @@
 const $ = selector => document.querySelector(selector);
-const state = { csrf: '', settings: null, pending: [], sales: [], importData: null, noticeTimer: null };
+const state = { csrf: '', settings: null, pending: [], sales: [], importData: null, noticeTimer: null, loginGeneration: 0 };
 const money = value => `$${Number(value || 0).toLocaleString('zh-TW')}`;
 const twDate = value => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' }).format(value);
 const twTime = value => new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value));
@@ -64,6 +64,7 @@ function showLogin() {
 }
 
 async function initialize() {
+  const generation = state.loginGeneration;
   try {
     const status = await api('/api/auth/status');
     state.csrf = status.csrf_token;
@@ -74,7 +75,7 @@ async function initialize() {
     $('#stats-from').value = $('#stats-to').value = today();
     await Promise.all([refreshSettings(), refreshToday()]);
     showView('today');
-  } catch { showLogin(); }
+  } catch { if (generation === state.loginGeneration) showLogin(); }
 }
 
 async function refreshSettings() {
@@ -299,6 +300,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const result = await api('/api/auth/session', { method: 'POST', body: JSON.stringify({ password: $('#password').value }) });
       state.csrf = result.csrf_token;
+      state.loginGeneration += 1;
       $('#password').value = '';
       await initialize();
     } catch (error) { $('#login-error').textContent = error.message; }

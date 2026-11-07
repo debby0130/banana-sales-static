@@ -63,17 +63,13 @@ function showLogin() {
   state.csrf = '';
 }
 
-async function initialize() {
+async function initialize(skipStatus = false) {
   const generation = state.loginGeneration;
   try {
-    let status;
-    let lastError;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try { status = await api('/api/auth/status'); break; }
-      catch (error) { lastError = error; await new Promise(resolve => setTimeout(resolve, 450 * (attempt + 1))); }
+    if (!skipStatus) {
+      const status = await api('/api/auth/status');
+      state.csrf = status.csrf_token;
     }
-    if (!status) throw lastError || new Error('登入工作階段尚未同步');
-    state.csrf = status.csrf_token;
     $('#login-screen').hidden = true;
     $('#app-screen').hidden = false;
     $('#today-label').textContent = `${today()} · 今天也一起加油！`;
@@ -308,7 +304,7 @@ document.addEventListener('DOMContentLoaded', () => {
       state.csrf = result.csrf_token;
       state.loginGeneration += 1;
       $('#password').value = '';
-      await initialize();
+      await initialize(true);
     } catch (error) { $('#login-error').textContent = error.message; }
   });
   document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => showView(button.dataset.view)));

@@ -163,55 +163,116 @@ async function submitSale(payload, key = crypto.randomUUID()) {
   }
 }
 
+
 function renderPending() {
-  $('#pending-list').innerHTML = state.pending.map(item => `<div class="pending-card"><div><strong>待送出：${item.quantity} ${item.unit} · ${money(item.quantity * item.price)}</strong><small>${item.sending ? '正在送出…' : item.failed ? '送出失敗，請重試' : `約 ${Math.max(0, Math.ceil((item.deadline - Date.now()) / 1000))} 秒後入帳`}</small></div><div>${item.sending ? '' : `<button type="button" data-undo="${item.id}">撤銷</button>`}${item.failed ? `<button type="button" data-retry="${item.id}">重試</button>` : ''}</div></div>`).join('');
+  $('#pending-list').innerHTML = state.pending.map(item => `
+    <div class="pending-card">
+      <div>
+        <strong>${item.quantity} ${item.unit} · ${money(item.quantity * item.price)}</strong>
+        <small>${item.sending ? '正在送出…' : '送出未成功，請確認或重試'}</small>
+      </div>
+      <div>
+        ${item.failed ? `
+          <button type="button" data-retry="${item.id}">重試</button>
+          <button type="button" data-undo="${item.id}">移除</button>
+        ` : ''}
+      </div>
+    </div>
+  `).join('');
 }
 
 function addQuick(bunch, piece) {
+  if (!state.settings) {
+    notice('價格資料尚未載入，請重新整理', true);
+    return;
+  }
+
   const settings = { ...state.settings };
   const unit = bunch ? '串' : '根';
   const quantity = bunch || piece;
   const price = bunch ? settings.bunch_price : settings.piece_price;
-  if (price === 0 && !confirm('這筆金額是 $0，確定要記錄零元交易嗎？')) return;
-  const found = state.pending.find(item => !item.failed && item.unit === unit && item.price === price && item.version === settings.version && item.deadline > Date.now());
-  if (found) {
-    found.quantity += quantity;
-    // The first click starts the 10 second window; further taps do not extend it.
-  } else {
-    const item = { id: crypto.randomUUID(), key: crypto.randomUUID(), unit, quantity, price, settings, version: settings.version, deadline: Date.now() + 10000, failed: false };
-    state.pending.push(item);
-    item.timer = setTimeout(() => flushQuick(item), 10000);
+
+  if (price === 0 &&
+      !confirm('這筆金額是 $0，確定要記錄零元交易嗎？')) {
+    return;
   }
+
+  const item = {
+    id: crypto.randomUUID(),
+    key: crypto.randomUUID(),
+    unit,
+    quantity,
+    price,
+    settings,
+    version: settings.version,
+    failed: false,
+    sending: false
+  };
+
+  state.pending.push(item);
   renderPending();
+
+  // 不等待 10 秒，立即送出
+  void flushQuick(item);
 }
 
 async function flushQuick(item) {
   if (!state.pending.includes(item) || item.sending) return;
+
   item.sending = true;
+  item.failed = false;
   renderPending();
-  const payload = { bunch_quantity: item.unit === '串' ? item.quantity : 0, piece_quantity: item.unit === '根' ? item.quantity : 0, bunch_price: item.settings.bunch_price, piece_price: item.settings.piece_price, mode: 'quick', expected_settings_version: item.version, zero_amount_confirmed: item.price === 0 };
+
+  const payload = {
+    bunch_quantity: item.unit === '串' ? item.quantity : 0,
+    piece_quantity: item.unit === '根' ? item.quantity : 0,
+    bunch_price: item.settings.bunch_price,
+    piece_price: item.settings.piece_price,
+    mode: 'quick',
+    expected_settings_version: item.version,
+    zero_amount_confirmed: item.price === 0
+  };
+
   try {
+    // 重試時沿用相同 key，避免重複入帳
     await submitSale(payload, item.key);
-    state.pending = state.pending.filter(candidate => candidate !== item);
-    renderPending();
-    await refreshToday();
-    notice('販售已記錄');
   } catch (error) {
     item.sending = false;
     item.failed = true;
     renderPending();
     notice(error.message, true);
+    return;
+  }
+
+  // API 已確認寫入成功
+  state.pending = state.pending.filter(
+    candidate => candidate !== item
+  );
+  renderPending();
+
+  try {
+    await refreshToday();
+    notice('販售已記錄');
+  } catch (error) {
+    // 寫入已成功，畫面更新失敗不可當成交易失敗重試
+    notice('販售已入帳，但畫面更新失敗，請重新整理', true);
   }
 }
 
 function removePending(id) {
   const item = state.pending.find(candidate => candidate.id === id);
-  if (!item) return;
-  clearTimeout(item.timer);
-  state.pending = state.pending.filter(candidate => candidate !== item);
+
+  // 只允許移除送出失敗的項目
+  if (!item || item.sending || !item.failed) return;
+
+  state.pending = state.pending.filter(
+    candidate => candidate !== item
+  );
+
   renderPending();
-  notice('已撤銷待送出交易');
+  notice('已移除失敗項目；請至販售明細確認是否已入帳');
 }
+
 
 async function loadHistory() {
   const from = $('#history-from').value, to = $('#history-to').value;
@@ -315,7 +376,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('#refresh').addEventListener('click', async () => { try { await Promise.all([refreshSettings(), refreshToday()]); if (!$('#history-view').hidden) await loadHistory(); if (!$('#stats-view').hidden) await loadStats(); notice('已更新資料'); } catch (error) { notice(error.message, true); } });
   $('#quick-buttons').addEventListener('click', event => { const button = event.target.closest('[data-bunch]'); if (button) addQuick(Number(button.dataset.bunch), Number(button.dataset.piece)); });
   $('#pending-list').addEventListener('click', event => { const undo = event.target.closest('[data-undo]'); const retry = event.target.closest('[data-retry]'); if (undo) removePending(undo.dataset.undo); if (retry) { const item = state.pending.find(candidate => candidate.id === retry.dataset.retry); if (item) flushQuick(item); } });
-  setInterval(renderPending, 1000);
+ 
   document.querySelectorAll('#custom-form input,#edit-form input').forEach(input => input.addEventListener('input', updateTotals));
   $('#custom-form').addEventListener('submit', async event => {
     event.preventDefault();
